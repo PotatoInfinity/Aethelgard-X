@@ -1,5 +1,6 @@
 # **Aethelgard-X: The Technical Realization Whitepaper**
 **Engine Class:** Post-Search / Geometric Solver
+<img width="2602" height="1412" alt="image" src="https://github.com/user-attachments/assets/5eb07df9-8812-4065-96dd-6a4f60d3638d" />
 
 ---
 
