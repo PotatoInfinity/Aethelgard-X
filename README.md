@@ -329,5 +329,76 @@ fn supervisor_loop() {
 
 ---
 
+### **Aethelgard-X Alpha: Patch v1.2 (The "Entanglement" Update)**
+
+#### **1. The Versor Field: Move Execution as Rotors**
+In the 5D CGA kernel, moving a piece from $P_a$ to $P_b$ is not a state-swap. It is a **Point-to-Point Translation** via a **Translator Versor** $T$.
+*   **The Math:** $T = 1 - \frac{1}{2} d n_\infty$, where $d$ is the Euclidean displacement vector.
+*   **The Execution:** Instead of re-calculating the entire board, we apply the rotor to the multivector representing the piece: $M_{new} = T M_{old} \tilde{T}$.
+*   **Advantage:** This allows for **Sub-Grid Influence**. A piece on $d4$ doesn't just "exist" at $d4$; its multivector field "leaks" into adjacent squares via the blade width, naturally modeling "control of the center" without explicit heuristics.
+
+---
+
+#### **2. Strategic Evaluation: Von Neumann Entanglement Entropy**
+The Tensor Network (MPS) allows us to quantify the "Complexity" or "Tension" of a position using **Entanglement Entropy** ($S_{vN}$).
+*   **The Metric:** For a bipartition of the board (e.g., Queenside vs. Kingside), we calculate the Schmidt decomposition of the bond.
+    $$S_{vN} = -\sum \lambda_i^2 \ln(\lambda_i^2)$$
+*   **Interpretation:** 
+    *   **High Entropy:** High tactical entanglement. Pieces are mutually defending/attacking across the partition. The "Shadow" engine should be given more CPU cycles here.
+    *   **Low Entropy:** Strategic decoupling. The engine can simplify the manifold and focus on long-range geodesic planning (endgame technique).
+*   **Implementation:** We use the `Bond Dimension (chi)` as a dynamic "Resolution" slider. In high-tension positions, we allow $\chi$ to expand to 20; in quiet positions, we truncate it to 4 to save power.
+
+---
+
+#### **3. The Sliding Piece Kernel: Exponential Attenuation**
+**The Problem:** Sliding pieces (Rooks/Bishops) are blocked by other pieces. FMM naturally handles this via "Cost," but it can be computationally expensive to re-calculate the cost map every move.
+**The Fix:** **The Attenuated Wedge.**
+A sliding piece is represented as a **Bivector Blade** $B$. When a piece $O$ (Obstacle) occupies a square on the line, we apply a **Geometric Wedge** that "shadows" the squares behind it.
+*   **The Logic:** 
+    $$\text{Vision}(T) = (B \wedge T) \cdot \exp(-\alpha \sum \text{Mass}(O))$$
+    Where $\alpha$ is the "Opacity" of the piece. A Pawn is fully opaque ($\alpha \to \infty$); a friendly piece might be semi-transparent for "X-ray" attacks.
+
+---
+
+#### **4. Memory Management: The SVD Buffer**
+Contracting the MPS snake path $A_1 \dots A_{64}$ is $O(N \cdot d \cdot \chi^3)$. At $\chi=10$, this is fast, but at $\chi=50$, it stalls.
+**The Optimization: Canonical Form Cache.**
+We maintain the MPS in **Left-Canonical Form**. When a move is made at square $k$, we only need to re-orthogonalize the tensors at $k$ and its immediate neighbors.
+```rust
+// In tensor_net.rs
+fn move_update(&mut self, from: usize, to: usize) {
+    // 1. Update local tensors for 'from' and 'to'
+    self.tensors[from] = Tensor::empty();
+    self.tensors[to] = Tensor::new_piece(PIECE_TYPE);
+
+    // 2. Perform a "Local Sweep"
+    // Instead of a full DMRG sweep, we use a 2-site SVD update 
+    // centered on the 'to' square.
+    self.local_dmrg_step(to);
+}
+```
+This keeps the global "Strategic Wavefunction" stable while reacting instantly to tactical changes.
+
+---
+
+#### **5. Hardware: The "Tensor Core" Dispatcher**
+Modern CPUs (and even Apple Silicon/NVIDIA GPUs) have specialized hardware for Matrix Multiplication (AMX/Tensor Cores). Aethelgard-X should offload the **DMRG Contraction** to these units.
+
+*   **The Pipeline:**
+    1.  **CPU (ALU):** The Shadow Engine (Bitboards) handles the illegal move filtering.
+    2.  **CPU (AVX-512):** The Geometry Kernel calculates the CGA Inner Products (Tactics).
+    3.  **AMX/GPU:** The Tensor Network calculates the Entanglement Entropy and Global Evaluation.
+
+---
+
+### **The "Sudden Death" Protocol (Endgame Optimization)**
+When the manifold detects the total number of pieces $N < 10$, it triggers a **Topological Collapse**.
+1.  The FMM Cost Matrix is discarded.
+2.  The engine switches to a **Radial Basis Function (RBF)** solver.
+3.  The goal becomes the maximization of the **King's Geometric Confinement**.
+4.  The engine no longer "evaluates" the board; it simply minimizes the available "Null Space" for the enemy King until it reaches zero (Checkmate).
+
+---
+
 ### **Conclusion**
 Aethelgard-X Alpha is the first engine to move from Searching for a Win to Observing the Inevitability of a Win. By using the Adjoint Shadow to guard against blunders, the engine can commit its full computational power to the high-dimensional manifold, reaching 3500+ Elo not through depth, but through the Topological Certainty of its path.
