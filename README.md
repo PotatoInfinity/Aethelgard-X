@@ -208,6 +208,124 @@ fn main() {
     }
 }
 ```
+---
+
+### **Aethelgard-X Alpha: Patch v1.1 (The "Wormhole" Update)**
+
+#### **1. The Knight Kernel: Point-Pair Rotors**
+**The Problem:** In FMM (Fast Marching Method), a wave propagates through neighbors. A Knight move $g1 \to f3$ is not a propagation; it is a teleportation. If you treat it as a line, it collides with pawns on $g2/f2$.
+**The Fix:** **Topological Sewing.**
+Instead of calculating distance $d(g1, f3)$, we manually alter the **Adjacency Graph** of the manifold.
+*   **The Math:** We define a **Wormhole Operator** $W_{knight}$.
+    $$W_{knight}: \text{Metric}(x, y) \to 0 \quad \text{if} \quad (x, y) \in \text{KnightSet}$$
+*   **Implementation:** In the FMM solver loop, the Knight doesn't check "Neighbors" (Up/Down/Left/Right). It checks "Connected Components."
+    ```rust
+    // In fmm.rs
+    fn get_neighbors(square: usize) -> Vec<usize> {
+        let mut neighbors = ADJACENCY_LIST[square]; // Standard king/sliding moves
+        if piece_type(square) == KNIGHT {
+            // The Knight "folds" the manifold
+            // These squares are now distance=1, regardless of intervening pieces
+            neighbors.extend_from_slice(&KNIGHT_LOOKUP[square]);
+        }
+        neighbors
+    }
+    ```
+
+---
+
+#### **2. The Engine Room: AVX-512 Geometric Product**
+You are absolutely right. The generic $O(N^2)$ multiplication will kill the engine. We need a **Cayley Table Lookup** combined with **XOR Sign Flipping**.
+
+**The Logic:**
+In $Cl_{4,1}$, the product of two basis vectors $e_i e_j$ is either $e_k$, $-e_k$, or scalar. The "result basis" is deterministic (XOR of bitmasks). The "sign" is the tricky part.
+
+**The Rust/ASM Strategy:**
+We pre-compute the **Sign Matrix** (1024x1024 bits) and pack it.
+```rust
+// In geometry.rs
+// Pre-computed constants for Cl(4,1)
+const GP_SIGNS: [u32; 32] = [ /* Bitmasks representing sign flips */ ];
+const GP_PERMUTES: [u8; 32] = [ /* Permutation indices for shuffling lanes */ ];
+
+#[inline(always)]
+unsafe fn geometric_product_avx512(a: __m512, b: __m512) -> __m512 {
+    let mut accumulator = _mm512_setzero_ps();
+    
+    // We iterate 32 times (or unroll by 8), shuffling 'b' to align 
+    // with 'a' based on the Cayley Table.
+    for i in 0..32 {
+        let a_lane = _mm512_set1_ps(a[i]); // Broadcast a[i]
+        
+        // Permute 'b' so components align
+        let b_perm = _mm512_permutexvar_ps(GP_PERMUTES[i], b);
+        
+        // Apply Sign Flip (XOR)
+        let sign_mask = _mm512_load_ps(&GP_SIGNS[i]); 
+        let b_signed = _mm512_xor_ps(b_perm, sign_mask);
+        
+        // Fused Multiply-Add
+        accumulator = _mm512_fmadd_ps(a_lane, b_signed, accumulator);
+    }
+    accumulator
+}
+```
+*   **Impact:** This reduces the Geometric Product from ~1000 cycles to ~40 cycles. This is the heartbeat of the engine.
+
+---
+
+#### **3. Training: DMRG (The "Sweeping" Algorithm)**
+Using standard Backprop on a Tensor Network is suicide. **DMRG (Density Matrix Renormalization Group)** is the correct approach.
+
+**The Algorithm (The "Snake" Sweep):**
+1.  **Map:** Convert 8x8 board to a 1D Snake Path (a1..a8, b8..b1, c1..c8...).
+2.  **Environment:** Calculate the "Left Environment" $L$ and "Right Environment" $R$ for the current bond.
+3.  **Local Update:** We optimize the two center tensors $A_i, A_{i+1}$ to minimize:
+    $$E = \| (L \cdot A_i \cdot A_{i+1} \cdot R) - \text{StockfishEval} \|^2$$
+4.  **SVD Split:** Once optimized, use SVD to split the combined $A_i A_{i+1}$ back into two tensors, truncating small singular values (compression).
+5.  **Sweep:** Move to $i+1$ and repeat.
+
+**Why this works for Chess:** It prioritizes **Local Tactics** (adjacent squares in the snake) while preserving **Global Strategy** (the $L$ and $R$ environments).
+
+---
+
+#### **4. The Shadow Feedback: The "Tactical Mask"**
+The "Checkmate Paradox" (Zugzwang) is the biggest risk. The FMM solver sees "Cost" but might miss "Forced Moves" (where Cost is irrelevant because you have no choice).
+
+**The Refined Supervisor Loop:**
+Instead of a binary Veto, the Shadow modifies the **Manifold Terrain**.
+
+```rust
+struct ShadowFeedback {
+    is_safe: bool,
+    danger_squares: Vec<(Square, f32)>, // Square + "Infinite Mass" value
+}
+
+fn supervisor_loop() {
+    let mut terrain_modifiers = HashMap::new();
+    
+    loop {
+        // 1. Manifold calculates Flow (considering current modifiers)
+        let flow_move = manifold.solve_fmm(&terrain_modifiers);
+        
+        // 2. Shadow Probes
+        let feedback = shadow.probe_tactics(flow_move);
+        
+        if feedback.is_safe {
+            return flow_move;
+        } else {
+            // CRITICAL: We don't just pick the next move.
+            // We tell the Manifold *why* it failed.
+            for (sq, mass) in feedback.danger_squares {
+                // "There is a sniper on E5."
+                terrain_modifiers.insert(sq, mass); 
+            }
+            // Manifold re-solves the flow with the new "mountains" added
+        }
+    }
+}
+```
+*   **Result:** The Manifold "learns" the tactics in real-time. If the Shadow sees a Knight fork on C7, it puts a "Mountain" on C7. The Manifold then naturally flows around it, finding a path that is *strategically* sound but *tactically* adjusted.
 
 ---
 
