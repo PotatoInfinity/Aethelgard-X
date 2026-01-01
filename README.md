@@ -162,6 +162,4 @@ fn main() {
 ```
 
 
-By merging the **Retrocausal Bridge** (knowing the end) with **Simplicial Rigidity** (knowing the structure), Aethelgard-X does not play moves—it **curves the future** until the opponent’s defeat becomes a mathematical necessity of the board’s geometry.
-
-Aethelgard-X Alpha is the first engine to move from Searching for a Win to Observing the Inevitability of a Win. By using the Adjoint Shadow to guard against blunders, the engine can commit its full computational power to the high-dimensional manifold, reaching 3500+ Elo not through depth, but through the Topological Certainty of its path.
+By merging the **Retrocausal Bridge** (knowing the end) with **Simplicial Rigidity** (knowing the structure), Aethelgard-X does not play moves—it **curves the future** until the opponent’s defeat becomes a mathematical necessity of the board’s geometry. Aethelgard-X Alpha is the first engine to move from Searching for a Win to Observing the Inevitability of a Win. 
